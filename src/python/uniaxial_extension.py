@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Based on the OpenCMISS-Iron uniaxial extension example, trying to replicate example 521 from classic-cm.
+# Based on the OpenCMISS uniaxial extension example, trying to replicate example 521 from classic-cm.
 
 #> Main script
 # Add Python bindings directory to PATH
@@ -18,6 +18,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
 
     NumberOfGaussXi = 2
 
+    contextUserNumber = 1
     coordinateSystemUserNumber = 1
     regionUserNumber = 1
     basisUserNumber = 1
@@ -25,6 +26,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     generatedMeshUserNumber = 1
     meshUserNumber = 1
     decompositionUserNumber = 1
+    decomposerUserNumber = 1
     geometricFieldUserNumber = 1
     fibreFieldUserNumber = 2
     materialFieldUserNumber = 3
@@ -52,26 +54,37 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     else:
         numberOfXi = 3
 
+    context = iron.Context()
+    context.Create(contextUserNumber)
+    
+    worldRegion = iron.Region()
+    context.WorldRegionGet(worldRegion)
+
     # Get the number of computational nodes and this computational node number
-    numberOfComputationalNodes = iron.ComputationalNumberOfNodesGet()
-    computationalNodeNumber = iron.ComputationalNodeNumberGet()
+    computationEnvironment = iron.ComputationEnvironment()
+    context.ComputationEnvironmentGet(computationEnvironment)
+
+    worldWorkGroup = iron.WorkGroup()
+    computationEnvironment.WorldWorkGroupGet(worldWorkGroup)
+    numberOfComputationalNodes = worldWorkGroup.NumberOfGroupNodesGet()
+    computationalNodeNumber = worldWorkGroup.GroupNodeNumberGet()
 
     # Create a 3D rectangular cartesian coordinate system
     coordinateSystem = iron.CoordinateSystem()
-    coordinateSystem.CreateStart(coordinateSystemUserNumber)
+    coordinateSystem.CreateStart(coordinateSystemUserNumber,context)
     coordinateSystem.DimensionSet(3)
     coordinateSystem.CreateFinish()
 
     # Create a region and assign the coordinate system to the region
     region = iron.Region()
-    region.CreateStart(regionUserNumber,iron.WorldRegion)
+    region.CreateStart(regionUserNumber,worldRegion)
     region.LabelSet("Region")
     region.coordinateSystem = coordinateSystem
     region.CreateFinish()
 
     # Define basis
     basis = iron.Basis()
-    basis.CreateStart(basisUserNumber)
+    basis.CreateStart(basisUserNumber,context)
     if InterpolationType in (1,2,3,4):
         basis.type = iron.BasisTypes.LAGRANGE_HERMITE_TP
     elif InterpolationType in (7,8,9):
@@ -85,7 +98,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     if(usePressureBasis):
         # Define pressure basis
         pressureBasis = iron.Basis()
-        pressureBasis.CreateStart(pressureBasisUserNumber)
+        pressureBasis.CreateStart(pressureBasisUserNumber,context)
         if InterpolationType in (1,2,3,4):
             pressureBasis.type = iron.BasisTypes.LAGRANGE_HERMITE_TP
         elif InterpolationType in (7,8,9):
@@ -136,13 +149,18 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     decomposition = iron.Decomposition()
     decomposition.CreateStart(decompositionUserNumber,mesh)
     decomposition.type = iron.DecompositionTypes.CALCULATED
-    decomposition.numberOfDomains = numberOfComputationalNodes
     decomposition.CreateFinish()
+
+    # Create a decomposer and decompose
+    decomposer = iron.Decomposer()
+    decomposer.CreateStart(decomposerUserNumber,region,worldWorkGroup)
+    decompositionIndex = decomposer.DecompositionAdd(decomposition)
+    decomposer.CreateFinish()
 
     # Create a field for the geometry
     geometricField = iron.Field()
     geometricField.CreateStart(geometricFieldUserNumber,region)
-    geometricField.MeshDecompositionSet(decomposition)
+    geometricField.DecompositionSet(decomposition)
     geometricField.TypeSet(iron.FieldTypes.GEOMETRIC)
     geometricField.VariableLabelSet(iron.FieldVariableTypes.U,"Geometry")
     geometricField.ComponentMeshComponentSet(iron.FieldVariableTypes.U,1,1)
@@ -196,7 +214,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     fibreField = iron.Field()
     fibreField.CreateStart(fibreFieldUserNumber,region)
     fibreField.TypeSet(iron.FieldTypes.FIBRE)
-    fibreField.MeshDecompositionSet(decomposition)
+    fibreField.DecompositionSet(decomposition)
     fibreField.GeometricFieldSet(geometricField)
     fibreField.VariableLabelSet(iron.FieldVariableTypes.U,"Fibre")
     if InterpolationType == 4:
@@ -211,7 +229,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     materialField = iron.Field()
     materialField.CreateStart(materialFieldUserNumber,region)
     materialField.TypeSet(iron.FieldTypes.MATERIAL)
-    materialField.MeshDecompositionSet(decomposition)
+    materialField.DecompositionSet(decomposition)
     materialField.GeometricFieldSet(geometricField)
     materialField.NumberOfVariablesSet(1)
     materialField.NumberOfComponentsSet(iron.FieldVariableTypes.U,numberOfMaterialComponents)
@@ -243,7 +261,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     dependentField.CreateStart(dependentFieldUserNumber,region)
     dependentField.VariableLabelSet(iron.FieldVariableTypes.U,"Dependent")
     dependentField.TypeSet(iron.FieldTypes.GEOMETRIC_GENERAL)
-    dependentField.MeshDecompositionSet(decomposition)
+    dependentField.DecompositionSet(decomposition)
     dependentField.GeometricFieldSet(geometricField)
     dependentField.DependentTypeSet(iron.FieldDependentTypes.DEPENDENT)
     dependentField.NumberOfVariablesSet(2)
@@ -287,7 +305,7 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     # deformed fibres from the dependent field because it isn't a geometric field.
     deformedField = iron.Field()
     deformedField.CreateStart(deformedFieldUserNumber, region)
-    deformedField.MeshDecompositionSet(decomposition)
+    deformedField.DecompositionSet(decomposition)
     deformedField.TypeSet(iron.FieldTypes.GEOMETRIC)
     deformedField.VariableLabelSet(iron.FieldVariableTypes.U, "DeformedGeometry")
     for component in [1, 2, 3]:
@@ -329,8 +347,8 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     problem = iron.Problem()
     problemSpecification = [iron.ProblemClasses.ELASTICITY,
             iron.ProblemTypes.FINITE_ELASTICITY,
-            iron.ProblemSubtypes.NONE]
-    problem.CreateStart(problemUserNumber, problemSpecification)
+            iron.ProblemSubtypes.STATIC_FINITE_ELASTICITY]
+    problem.CreateStart(problemUserNumber,context,problemSpecification)
     problem.CreateFinish()
 
     # Create control loops
@@ -427,12 +445,13 @@ def solveModel(compressible, useGeneratedMesh, zeroLoad, usePressureBasis):
     fields.ElementsExport(output_file+prefix,"FORTRAN")
     fields.Finalise()
 
-    problem.Destroy()
-    if useGeneratedMesh:
-      generatedMesh.Destroy()
-    basis.Destroy()
-    region.Destroy()
-    coordinateSystem.Destroy()
+    #problem.Destroy()
+    #if useGeneratedMesh:
+    #  generatedMesh.Destroy()
+    #basis.Destroy()
+    #region.Destroy()
+    #coordinateSystem.Destroy()
+    context.Destroy()
 
 if __name__ == "__main__":
     compressible = False
